@@ -45,32 +45,44 @@ def ocr(image):
     mapper = {  "bbox-0": "min_row", "bbox-1": "min_col", "bbox-2": "max_row", "bbox-3": "max_col"}
     im_props.rename(columns=mapper, inplace=True)
     im_props.eval("sum_x_y = min_row + min_col", inplace=True)
-    process_props = deepcopy(im_props)
+    letter_imgs = im_props.pop('image_intensity').to_numpy()
+    letter_props = im_props.to_numpy()
     chars = []
-    while(process_props.__len__() > 0):
+    while(letter_props.shape[0] > 0):
         chars.append([])
-        idx_tl = process_props['sum_x_y'].idxmin() # index of the top left point
-        current_row = process_props.query("min_row <" + str(process_props.loc[idx_tl]['max_row'])).copy(deep=True) # get the characters in the current row
-        process_props.drop(index=current_row.index,inplace=True) # remove them from the list of all properties
-        current_row.sort_values(by="min_col", inplace=True) # order left to right
-        i=0
-        for idx in current_row.index:
+        idx_tl = letter_props[:, 5].argmin() # index of the top left point is the smallest sum of min_x and min_y
+        current_row_idxs = ((letter_props[:, 1] < letter_props[idx_tl, 3]) * np.arange(letter_props.shape[0]))
+        current_row_idxs = current_row_idxs[np.nonzero(current_row_idxs)]
+        current_row_idxs = np.unique(np.append(current_row_idxs, idx_tl))
+        current_row_props = letter_props[current_row_idxs]
+        current_row_imgs = letter_imgs[current_row_idxs]
+        letter_props = np.delete(letter_props, current_row_idxs, axis=0) # remove the current indexes from the list of labels to be processed
+        letter_imgs = np.delete(letter_imgs, current_row_idxs, axis=0) # remove the associated images
+        current_row_imgs = current_row_imgs[current_row_props[:,2].argsort()] # order images left to right based on min_col, https://stackoverflow.com/a/2828121
+        figure = plt.figure()
+        i = 0
+        for letter_image in current_row_imgs:
             i += 1
-            curr_img = current_row.loc[idx]['image_intensity']
-            scaled_img = transform.rescale(curr_img, 26 / np.array(curr_img.shape).max(), anti_aliasing=False)
-            pad_x_begin = 0
+            scaled_img = transform.rescale(letter_image, 26 / np.array(letter_image.shape).max(), anti_aliasing=False)
+            pad_x_beg = 0
             pad_x_end = 0
-            pad_y_begin = 0
+            pad_y_beg = 0
             pad_y_end = 0
             if(scaled_img.shape != (28, 28)):
                 row, col = scaled_img.shape
-                pad_x_begin = int(np.floor((28 - col)/2))
-                pad_x_end = int(np.ceil((28 - col)/2))
-                pad_y_begin = int(np.floor((28-row)/2))
-                pad_y_end = int(np.ceil((28-row)/2))
-            padded_img = np.pad(scaled_img, pad_width=((pad_y_begin, pad_y_end),(pad_x_begin, pad_x_end)))
+                pad_x_beg = int(np.floor((28 - col)/2))
+                pad_x_end = int(np.ceil( (28 - col)/2))
+                pad_y_beg = int(np.floor((28 - row)/2))
+                pad_y_end = int(np.ceil( (28 - row)/2))
+            padded_img = np.pad(scaled_img, pad_width=((pad_y_beg, pad_y_end),(pad_x_beg, pad_x_end)))
             char_img = (padded_img > 0).astype(np.int8)
             chars[-1].append(predictor.predict(char_img))
+            ax1 = plt.subplot(2, len(current_row_idxs), i)
+            ax2 = plt.subplot(2, len(current_row_idxs), i + len(current_row_idxs))
+            ax1.imshow(char_img)
+            ax2.imshow(letter_image)
+            plt.setp(figure.axes, xticks=[], yticks=[])
+        plt.close('all')
     return chars
 
 def main():
